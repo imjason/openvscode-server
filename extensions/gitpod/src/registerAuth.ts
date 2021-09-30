@@ -108,19 +108,23 @@ function promptToReload(msg?: string): void {
 export async function addAuthProviderToSettings(): Promise<void> {
 	const syncStoreURL = `${baseURL}/code-sync`;
 	const config = vscode.workspace.getConfiguration();
-	try {
-		await config.update('configurationSync.store', {
-			url: syncStoreURL,
-			stableUrl: syncStoreURL,
-			insidersUrl: syncStoreURL,
-			canSwitch: true,
-			authenticationProviders: {
-				gitpod: {
-					scopes: ['function:accessCodeSyncStorage']
-				}
+	const newConfig = {
+		url: syncStoreURL,
+		stableUrl: syncStoreURL,
+		insidersUrl: syncStoreURL,
+		canSwitch: true,
+		authenticationProviders: {
+			gitpod: {
+				scopes: ['function:accessCodeSyncStorage']
 			}
-		}, true);
-		promptToReload();
+		}
+	};
+	try {
+		const currentConfig = await config.get('configurationSync.store');
+		if (JSON.stringify(currentConfig) !== JSON.stringify(newConfig)) {
+			await config.update('configurationSync.store', newConfig, true);
+			promptToReload();
+		}
 	} catch (e) {
 		vscode.window.showErrorMessage(`Error setting up code sync config: ${e}`);
 	}
@@ -185,8 +189,12 @@ function hasScopes(session: vscode.AuthenticationSession, scopes?: readonly stri
 	return !scopes || scopes.every(scope => session.scopes.includes(scope));
 }
 
+/**
+ * Adds a authenthication provider to the provided extension context
+ * @param context the extension context to act upon and the context to which push the authenthication service
+ * @param logger a function used for logging outputs
+ */
 function registerAuth(context: vscode.ExtensionContext, logger: (value: string) => void): void {
-
 	/**
 	 * Returns a promise which waits until the secret store `gitpod.authSession` item changes.
 	 * @returns a promise that resolves with the authentication session
@@ -213,8 +221,6 @@ function registerAuth(context: vscode.ExtensionContext, logger: (value: string) 
 	};
 
 	async function createSession(_scopes: string[]): Promise<vscode.AuthenticationSession> {
-		logger('Creating session...');
-
 		const callbackUri = `${vscode.env.uriScheme}://gitpod.gitpod-desktop/complete-gitpod-auth`;
 		const gitpodScopes = new Set<string>([
 			'function:accessCodeSyncStorage',
@@ -250,9 +256,16 @@ function registerAuth(context: vscode.ExtensionContext, logger: (value: string) 
 		});
 
 		// Open the authorization URL in the default browser
-		const authURI = vscode.Uri.parse(redirectUri.toString());
-		logger(`Opening browser at ${authURI.toString()}`);
-		await vscode.env.openExternal(authURI);
+		const authURI = vscode.Uri.from({ scheme: redirectUri.protocol.slice(0, -1), authority: redirectUri.hostname, path: redirectUri.pathname, query: redirectUri.search.slice(1) });
+		logger(`Opening browser at ${authURI.toString(true)}`);
+		const opened = await vscode.env.openExternal(authURI);
+		if (!opened) {
+			const selected = await vscode.window.showErrorMessage(`Couldn't open ${authURI.toString(true)} automatically, please copy and paste it to your browser manually.`, 'Copy', 'Cancel');
+			if (selected === 'Copy') {
+				vscode.env.clipboard.writeText(authURI.toString(true));
+				logger('Copied auth URL');
+			}
+		}
 		return Promise.race([timeoutPromise, await waitForAuthenticationSession()]);
 	}
 
