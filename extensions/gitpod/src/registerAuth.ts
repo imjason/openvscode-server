@@ -185,6 +185,12 @@ export async function resolveAuthenticationSession(scopes: readonly string[], ac
 	};
 }
 
+/**
+ * Checks if a authentication session includes the provided scopes
+ * @param session a VS Code authentication session
+ * @param scopes scopes to look for
+ * @returns a boolean value indicating whether the scopes match or not
+ */
 function hasScopes(session: vscode.AuthenticationSession, scopes?: readonly string[]): boolean {
 	return !scopes || scopes.every(scope => session.scopes.includes(scope));
 }
